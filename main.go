@@ -17,13 +17,13 @@ const (
 )
 
 var (
-	advapi32       = syscall.NewLazyDLL("advapi32.dll")
+	advapi32       = NewLazyDLL("advapi32.dll")
 	procLogonUserW = advapi32.NewProc("LogonUserW")
 
-	kernel32        = syscall.NewLazyDLL("kernel32.dll")
+	kernel32        = NewLazyDLL("kernel32.dll")
 	procCloseHandle = kernel32.NewProc("CloseHandle")
 
-	userenv               = syscall.NewLazyDLL("userenv.dll")
+	userenv               = NewLazyDLL("userenv.dll")
 	procDeleteProfileW    = userenv.NewProc("DeleteProfileW")
 	procLoadUserProfileW  = userenv.NewProc("LoadUserProfileW")
 	procUnloadUserProfile = userenv.NewProc("UnloadUserProfile")
