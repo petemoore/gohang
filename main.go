@@ -5,7 +5,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"os/user"
+	"runtime"
+	"sync"
 	"syscall"
 	"unsafe"
 )
@@ -27,6 +30,7 @@ var (
 	procDeleteProfileW    = userenv.NewProc("DeleteProfileW")
 	procLoadUserProfileW  = userenv.NewProc("LoadUserProfileW")
 	procUnloadUserProfile = userenv.NewProc("UnloadUserProfile")
+	procCreateProfile     = userenv.NewProc("CreateProfile")
 )
 
 type ProfileInfo struct {
@@ -41,20 +45,86 @@ type ProfileInfo struct {
 }
 
 func main() {
-	SetupGoRoutines()
-	for i := 4; ; i++ {
+	sigInterrupt := make(chan os.Signal, 1)
+	signal.Notify(sigInterrupt, os.Interrupt)
+
+	created := make(chan string)
+	created2 := make(chan string)
+	password := "_$rg274SGFh54D&$%"
+	var wg sync.WaitGroup
+	go func(wg *sync.WaitGroup) {
+		defer wg.Done()
+		for {
+			username := <-created
+			log.Printf("Receive: %v", username)
+			log.Printf("Deleting user profile %v...", username)
+			DeleteProfile(username)
+		}
+	}(&wg)
+
+	go func(wg *sync.WaitGroup) {
+		defer wg.Done()
+		for {
+			username := <-created2
+			log.Printf("Logging into user profile %v...", username)
+			LoginAndLogoutUser(username, password)
+		}
+	}(&wg)
+
+	for i := 4; i < 100; i++ {
 		username := fmt.Sprintf("testuser%v", i)
-		password := "_$rg274SGFh54D&$%"
-		log.Printf("Creating user %v...", username)
-		CreateProfile(username, password)
-		log.Printf("Logging user %v in and out...", username)
-		LoginAndLogoutUser(username, password)
-		log.Printf("Deleting user profile %v...", username)
-		DeleteProfile(username)
+		CreateUser(username, password)
 	}
+
+	go func(wg *sync.WaitGroup) {
+		defer wg.Done()
+
+		for {
+			for i := 4; i < 100; i++ {
+				username := fmt.Sprintf("testuser%v", i)
+				log.Printf("Creating user %v...", username)
+				CreateProfile(username)
+				log.Printf("Send: %v", username)
+				created <- username
+				created2 <- username
+			}
+		}
+	}(&wg)
+
+	go func() {
+		for {
+			runtime.GC()
+		}
+	}()
+
+	log.Printf("Waiting")
+	wg.Add(3)
+	wg.Wait()
+	log.Printf("Done")
 }
 
-func CreateProfile(username, password string) {
+func CreateProfile(username string) {
+	u, err := user.Lookup(username)
+	if err != nil {
+	}
+	_userSID, err := syscall.UTF16PtrFromString(u.Uid)
+	if err != nil {
+	}
+	_username, err := syscall.UTF16PtrFromString(username)
+	var ret = "123456789"
+	r1, _, e1 := procCreateProfile.Call(
+		uintptr(unsafe.Pointer(_userSID)),
+		uintptr(unsafe.Pointer(_username)),
+		uintptr(unsafe.Pointer(&ret)),
+		uintptr(9),
+	)
+
+	if int(r1) != 0 {
+		os.NewSyscallError("CreateProfile", e1)
+		return
+	}
+}
+func CreateUser(username, password string) {
 	cmd := exec.Command(
 		"net",
 		"user",
@@ -66,12 +136,20 @@ func CreateProfile(username, password string) {
 	out, err := cmd.CombinedOutput()
 	log.Printf("%s\n", out)
 	if err != nil {
-		panic(err)
+	}
+}
+
+func DeleteUser(username string) {
+	cmd := exec.Command("net", "user", username, "/del", "/y")
+	out, err := cmd.CombinedOutput()
+	log.Printf("%s\n", out)
+	if err != nil {
+		log.Printf("%s\n", err)
 	}
 }
 
 func LogonUser(username *uint16, domain *uint16, password *uint16, logonType uint32, logonProvider uint32) (token syscall.Token) {
-	r1, _, e1 := procLogonUserW.Call(
+	r1, _, _ := procLogonUserW.Call(
 		uintptr(unsafe.Pointer(username)),
 		uintptr(unsafe.Pointer(domain)),
 		uintptr(unsafe.Pointer(password)),
@@ -79,7 +157,6 @@ func LogonUser(username *uint16, domain *uint16, password *uint16, logonType uin
 		uintptr(logonProvider),
 		uintptr(unsafe.Pointer(&token)))
 	if int(r1) == 0 {
-		panic(os.NewSyscallError("LogonUser", e1))
 	}
 	return
 }
@@ -107,15 +184,12 @@ func UnloadUserProfile(token syscall.Token, profile syscall.Handle) error {
 func LoginAndLogoutUser(username, password string) {
 	_username, err := syscall.UTF16PtrFromString(username)
 	if err != nil {
-		panic(err)
 	}
 	_dot, err := syscall.UTF16PtrFromString(".")
 	if err != nil {
-		panic(err)
 	}
 	_password, err := syscall.UTF16PtrFromString(password)
 	if err != nil {
-		panic(err)
 	}
 	userHandle := LogonUser(
 		_username,
@@ -139,10 +213,12 @@ func DeleteProfile(username string) {
 	u, err := user.Lookup(username)
 	if err != nil {
 		panic(err)
+		return
 	}
 	_userSID, err := syscall.UTF16PtrFromString(u.Uid)
 	if err != nil {
 		panic(err)
+		return
 	}
 	DeleteProfileW(_userSID, nil, nil)
 }
@@ -164,7 +240,7 @@ func DeleteProfileW(
 		uintptr(unsafe.Pointer(lpComputerName)),
 	)
 	if r1 == 0 {
-		panic(os.NewSyscallError("DeleteProfileW", e1))
+		log.Printf("%s", os.NewSyscallError("DeleteProfileW", e1))
 	}
 }
 
@@ -175,9 +251,7 @@ func CloseHandle(handle syscall.Handle) {
 	)
 	if r1 == 0 {
 		if e1 != syscall.Errno(0) {
-			panic(error(e1))
 		} else {
-			panic(syscall.EINVAL)
 		}
 	}
 }
