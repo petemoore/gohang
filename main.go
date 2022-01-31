@@ -42,16 +42,34 @@ type ProfileInfo struct {
 
 func main() {
 	SetupGoRoutines()
-	for i := 4; ; i++ {
+	for i := 0; ; i++ {
 		username := fmt.Sprintf("testuser%v", i)
 		password := "_$rg274SGFh54D&$%"
+		// If user already exists, delete it
+		DeleteUser(username)
 		log.Printf("Creating user %v...", username)
 		CreateProfile(username, password)
 		log.Printf("Logging user %v in and out...", username)
 		LoginAndLogoutUser(username, password)
 		log.Printf("Deleting user profile %v...", username)
 		DeleteProfile(username)
+		log.Printf("Deleting user account %v...", username)
+		out, err := DeleteUser(username)
+		log.Printf("%s\n", out)
+		if err != nil {
+			panic(err)
+		}
 	}
+}
+
+func DeleteUser(username string) (out []byte, err error) {
+	cmd := exec.Command(
+		"net",
+		"user",
+		username,
+		"/delete",
+	)
+	return cmd.CombinedOutput()
 }
 
 func CreateProfile(username, password string) {
