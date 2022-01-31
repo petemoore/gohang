@@ -201,4 +201,17 @@ func CloseHandle(handle syscall.Handle) {
 }
 
 func SetupGoRoutines() {
+	passOn := func(dest, src chan bool) {
+		for message := range src {
+			dest <- message
+		}
+	}
+	channels := make([]chan bool, 10)
+	for i := range channels {
+		channels[i] = make(chan bool)
+	}
+	for i := range channels {
+		go passOn(channels[(i+1)%len(channels)], channels[i])
+	}
+	channels[0] <- true
 }
